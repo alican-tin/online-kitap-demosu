@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+generator erd {
+  provider     = "prisma-erd-generator"
+  output       = "../../docs/erd.md"
+  disableEmoji = true
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  CUSTOMER
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         UserRole
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sales        Sale[]
+}
+
+model Book {
+  id        String    @id @default(cuid())
+  title     String
+  author    String
+  imagePath String
+  price     Int
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  sales     Sale[]
+  revenues  Revenue[]
+}
+
+model Sale {
+  id          String   @id @default(cuid())
+  bookId      String
+  buyerId     String
+  quantity    Int
+  unitPrice   Int
+  totalAmount Int
+  soldAt      DateTime
+  createdAt   DateTime @default(now())
+  book        Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  buyer       User     @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+
+  @@index([bookId])
+  @@index([buyerId])
+  @@index([soldAt])
+}
+
+model Revenue {
+  id          String   @id @default(cuid())
+  bookId      String
+  amount      Int
+  periodStart DateTime
+  periodEnd   DateTime
+  createdAt   DateTime @default(now())
+  book        Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@index([bookId])
+  @@index([periodStart, periodEnd])
+}
