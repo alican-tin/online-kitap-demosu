@@ -19,6 +19,35 @@ const CUSTOMER_USER = {
   role: UserRole.CUSTOMER,
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const toAscii = (value: string) =>
+  value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9\s]/g, "");
+
+const buildEmail = (name: string, index: number) => {
+  const base = toAscii(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ".")
+    .replace(/^\.|\.$/g, "");
+  const local = base ? `${base}.${index + 1}` : `kullanici${index + 1}`;
+
+  return `${local}@demo.local`;
+};
+
+const buildUserTimestamps = (now: Date, minYears: number, maxYears: number) => {
+  const createdFrom = new Date(now.getFullYear() - maxYears, now.getMonth(), 1);
+  const createdTo = new Date(now.getFullYear() - minYears, now.getMonth(), 1);
+  const updatedTo = new Date(now.getTime() - DAY_MS * 7);
+
+  const createdAt = faker.date.between({ from: createdFrom, to: createdTo });
+  const updatedAt = faker.date.between({ from: createdAt, to: updatedTo });
+
+  return { createdAt, updatedAt };
+};
+
 // Static catalog: titles/authors/image paths are hand-curated.
 const BOOKS = [
   {
@@ -143,7 +172,7 @@ const BOOKS = [
   },
 ];
 
-const START_YEAR_OFFSET = 1; // Generate sales within the last N years.
+const SALES_HISTORY_YEARS = 3; // Generate sales within the last N years.
 
 const startOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
 
@@ -200,13 +229,22 @@ const buildSales = (
   });
 };
 
-const buildCustomers = () =>
-  Array.from({ length: 12 }, () => ({
-    name: faker.person.fullName(),
-    email: `user+${faker.string.uuid()}@demo.local`,
-    passwordHash: DEFAULT_PASSWORD_HASH,
-    role: UserRole.CUSTOMER,
-  }));
+const buildCustomers = (count: number, now: Date) =>
+  Array.from({ length: count }, (_, index) => {
+    const firstName = faker.person.firstName();
+    const lastName = faker.person.lastName();
+    const name = `${firstName} ${lastName}`;
+    const { createdAt, updatedAt } = buildUserTimestamps(now, 1, 6);
+
+    return {
+      name,
+      email: buildEmail(name, index),
+      passwordHash: DEFAULT_PASSWORD_HASH,
+      role: UserRole.CUSTOMER,
+      createdAt,
+      updatedAt,
+    };
+  });
 
 const resetDatabase = async (prisma: PrismaClient) => {
   await prisma.revenue.deleteMany();
@@ -220,9 +258,13 @@ export const runSeed = async (prisma: PrismaClient) => {
 
   await resetDatabase(prisma);
 
-  await prisma.user.create({ data: ADMIN_USER });
-  await prisma.user.create({ data: CUSTOMER_USER });
-  await prisma.user.createMany({ data: buildCustomers() });
+  const now = new Date();
+  const adminDates = buildUserTimestamps(now, 4, 7);
+  const customerDates = buildUserTimestamps(now, 2, 5);
+
+  await prisma.user.create({ data: { ...ADMIN_USER, ...adminDates } });
+  await prisma.user.create({ data: { ...CUSTOMER_USER, ...customerDates } });
+  await prisma.user.createMany({ data: buildCustomers(12, now) });
 
   const customers = await prisma.user.findMany({
     where: { role: UserRole.CUSTOMER },
@@ -230,8 +272,8 @@ export const runSeed = async (prisma: PrismaClient) => {
   });
 
   const customerIds = customers.map((customer) => customer.id);
-  const now = new Date();
-  const dateFrom = new Date(now.getFullYear() - START_YEAR_OFFSET, now.getMonth(), 1);
+  const dateFrom = new Date(now.getFullYear() - SALES_HISTORY_YEARS, now.getMonth(), 1);
+  const dateTo = new Date(now.getTime() - DAY_MS * 2);
 
   for (const book of BOOKS) {
     const price = faker.number.int({ min: 4500, max: 35000 });
@@ -242,7 +284,7 @@ export const runSeed = async (prisma: PrismaClient) => {
       },
     });
 
-    const salesData = buildSales(createdBook.id, customerIds, price, dateFrom, now);
+    const salesData = buildSales(createdBook.id, customerIds, price, dateFrom, dateTo);
     await prisma.sale.createMany({ data: salesData });
 
     const revenueData = buildRevenueBuckets(salesData).map((bucket) => ({
